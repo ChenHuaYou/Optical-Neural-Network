@@ -94,6 +94,7 @@ if __name__ == '__main__':
     img,Ih = generate(mask1,'./data/Train128//1.bmp')
     img.save('test.png')
     img2 = Image.open('./data/LTrain128/1.bmp').convert('L')
+    img2.save('test2.png')
     Ih2 = numpy.array(img2)
-    print(mse(torch.tensor(Ih2,dtype=torch.float64),torch.tensor(Ih2,dtype=torch.float64)))
+    print(mse(torch.tensor(Ih,dtype=torch.float64),torch.tensor(Ih2,dtype=torch.float64)))
 
