@@ -13,40 +13,35 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 
 import onn
+from dataset import MyDataset
+from pathlib import Path
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '8'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 
 def main(args):
 
-    if not os.path.exists(args.model_save_path):
-        os.mkdir(args.model_save_path)
+    split = 0.8
+    x_data = list(Path('data/out2/').glob('*.jpg'))
+    totalNum = len(x_data)
 
-    # transform = transforms.Compose([transforms.Resize(size=(200, 200)), transforms.ToTensor()])
-    transform = transforms.Compose([transforms.ToTensor()])
-    train_dataset = torchvision.datasets.MNIST("./data", train=True, transform=transform, download=True)
-    val_dataset = torchvision.datasets.MNIST("./data", train=False, transform=transform, download=True)
-    train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, num_workers=112, shuffle=True, pin_memory=True)
-    val_dataloader = DataLoader(dataset=val_dataset, batch_size=args.batch_size, num_workers=112, shuffle=False, pin_memory=True)
+    train_x_data = x_data[:int(totalNum*split)]
+    test_x_data = x_data[int(totalNum*split):]
 
-    model = onn.Net()
+    train_data = MyDataset(train_x_data,'data/LTrain/')
+    train_loader = torch.utils.data.DataLoader(dataset=train_data,batch_size=16,shuffle=True)
+
+    SIZE = 256
+    padding = int((SIZE-128)/2)
+    model = onn.Net(SIZE, num_layers=30)
     model.cuda()
 
-    if args.whether_load_model:
-        model.load_state_dict(torch.load(args.model_save_path + str(args.start_epoch) + args.model_name))
-        print('Model : "' + args.model_save_path + str(args.start_epoch) + args.model_name + '" loaded.')
-    else:
-        if os.path.exists(args.result_record_path):
-            os.remove(args.result_record_path)
-        else:
-            with open(args.result_record_path, 'w') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(
-                    ['Epoch', 'Train_Loss', "Train_Acc", 'Val_Loss', "Val_Acc", "LR"])
 
-    criterion = torch.nn.MSELoss(reduction='sum').cuda()
+    criterion = torch.nn.MSELoss().cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+
 
     for epoch in range(args.start_epoch + 1, args.start_epoch + 1 + args.num_epochs):
 
@@ -54,92 +49,34 @@ def main(args):
 
         model.train()
 
-        train_len = 0.0
-        train_running_counter = 0.0
         train_running_loss = 0.0
 
-        tk0 = tqdm(train_dataloader, ncols=100, total=int(len(train_dataloader)))
-        for train_iter, train_data_batch in enumerate(tk0):
+        for train_iter,train_data_batch in enumerate(train_loader):
 
-            train_images = train_data_batch[0].cuda()           # (64, 1, 200, 200) float32 1. 0.
-            train_labels = train_data_batch[1].cuda()           # (1024, 10) int64 9 0
-            train_images = F.pad(train_images, pad=(86, 86, 86, 86))
+            train_source = train_data_batch[0].cuda()       
+            train_target = train_data_batch[1].cuda()   
 
-            train_labels = F.one_hot(train_labels, num_classes=10).float()
+            train_source = F.pad(train_source, pad=(padding, padding, padding, padding))
 
-            train_images = torch.squeeze(torch.cat((train_images.unsqueeze(-1),
-                                                    torch.zeros_like(train_images.unsqueeze(-1))), dim=-1), dim=1)
-
-            train_outputs = model(train_images)
-
-            train_loss_ = criterion(train_outputs, train_labels)
-            train_counter_ = torch.eq(torch.argmax(train_labels, dim=1), torch.argmax(train_outputs, dim=1)).float().sum()
+            train_source = torch.squeeze(torch.cat((train_source.unsqueeze(-1),torch.zeros_like(train_source.unsqueeze(-1))), dim=-1), dim=1)
 
             optimizer.zero_grad()
+            train_outputs = model(train_source)
+            train_loss_ = criterion(train_outputs, train_target)
             train_loss_.backward()
             optimizer.step()
 
-            train_len += len(train_labels)
             train_running_loss += train_loss_.item()
-            train_running_counter += train_counter_
+            mse = criterion(train_outputs.detach(),train_target.detach())
 
-            train_loss = train_running_loss / train_len
-            train_accuracy = train_running_counter / train_len
-
-            tk0.set_description_str('Epoch {}/{} : Training'.format(epoch, args.start_epoch + 1 + args.num_epochs - 1))
-            tk0.set_postfix({'Train_Loss': '{:.5f}'.format(train_loss), 'Train_Accuracy': '{:.5f}'.format(train_accuracy)})
-
-        log.append(train_loss)
-        log.append(train_accuracy)
-
-        with torch.no_grad():
-            # 验证
-            model.eval()
-
-            val_len = 0.0
-            val_running_counter = 0.0
-            val_running_loss = 0.0
-
-            tk1 = tqdm(val_dataloader, ncols=100, total=int(len(val_dataloader)))
-            for val_iter, val_data_batch in enumerate(tk1):
-
-                val_images = val_data_batch[0].cuda()  # (64, 1, 200, 200) float32 1. 0.
-                val_labels = val_data_batch[1].cuda()  # (1024, 10) int64 9 0
-                val_images = F.pad(val_images, pad=(86, 86, 86, 86))
-                val_labels = F.one_hot(val_labels, num_classes=10).float()
-
-                val_images = torch.squeeze(torch.cat((val_images.unsqueeze(-1),
-                                                        torch.zeros_like(val_images.unsqueeze(-1))), dim=-1), dim=1)
-
-                val_outputs = model(val_images)
-
-                val_loss_ = criterion(val_outputs, val_labels)
-                val_counter_ = torch.eq(torch.argmax(val_labels, dim=1), torch.argmax(val_outputs, dim=1)).float().sum()
-
-                val_len += len(val_labels)
-                val_running_loss += val_loss_.item()
-                val_running_counter += val_counter_
-
-                val_loss = val_running_loss / val_len
-                val_accuracy = val_running_counter / val_len
-
-                tk1.set_description_str('Epoch {}/{} : Validating'.format(epoch, args.start_epoch + 1 + args.num_epochs - 1))
-                tk1.set_postfix({'Val_Loss': '{:.5f}'.format(val_loss), 'Val_Accuarcy': '{:.5f}'.format(val_accuracy)})
-
-            log.append(val_loss)
-            log.append(val_accuracy)
-
-        torch.save(model.state_dict(), (args.model_save_path + str(epoch) + args.model_name))
-        print('Model : "' + args.model_save_path + str(epoch) + args.model_name + '" saved.')
-
-        with open(args.result_record_path, 'a', newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(log)
+            #train_loss = train_running_loss / (train_iter+1)
+            print('epoch %d batch %d loss %.6f lr_rate %.10f'%(epoch, train_iter, train_loss_,optimizer.param_groups[0]['lr']))
+        scheduler.step()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # 训练参数
-    parser.add_argument('--batch-size', type=int, default=1024)
+    parser.add_argument('--batch-size', type=int, default=512)
     parser.add_argument('--num-epochs', type=int, default=400)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--lr', type=float, default=1e-3, help='学习率')
