@@ -9,8 +9,6 @@ cmask1=conj(mask1);
 chemin='c:\imgsWan\Train\';%图片路径
 Image=dir('c:\imgsWan\Train\');
 Number=length(Image)-2;
-load 'c:\b.mat'
-b=imresize(b,[128,128],'bicubic');
 for nn=1:(Number)
 
 		XRGB=imread(strcat(chemin,num2str(nn),'.jpg'));
@@ -43,9 +41,6 @@ for nn=1:(Number)
 		%%%%%%%%%%%%%%
 
 		Y=double(X);
-		a=ones(N,N);
-		b=rand(N,N)*2*pi;
-		% U0=Y.*exp(i.*b);  %叠加随机相位噪声,形成振幅正比于图像的初始场复振幅
 		U0=Y;
 		X0=abs(U0);       %初始场振幅,后面叠代运算用
 		% figstr=strcat('SLM平面宽度=',num2str(L),'mm');

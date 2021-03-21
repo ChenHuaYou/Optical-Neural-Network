@@ -30,11 +30,9 @@ def main(args):
     test_x_data = x_data[int(totalNum*split):]
 
     train_data = MyDataset(train_x_data,'data/LTrain/')
-    train_loader = torch.utils.data.DataLoader(dataset=train_data,batch_size=16,shuffle=True)
+    train_loader = torch.utils.data.DataLoader(dataset=train_data,batch_size=256,shuffle=True)
 
-    SIZE = 256
-    padding = int((SIZE-128)/2)
-    model = onn.Net(SIZE, num_layers=30)
+    model = onn.Net(128,15)
     model.cuda()
 
 
@@ -56,9 +54,6 @@ def main(args):
             train_source = train_data_batch[0].cuda()       
             train_target = train_data_batch[1].cuda()   
 
-            train_source = F.pad(train_source, pad=(padding, padding, padding, padding))
-
-            train_source = torch.squeeze(torch.cat((train_source.unsqueeze(-1),torch.zeros_like(train_source.unsqueeze(-1))), dim=-1), dim=1)
 
             optimizer.zero_grad()
             train_outputs = model(train_source)
@@ -67,7 +62,6 @@ def main(args):
             optimizer.step()
 
             train_running_loss += train_loss_.item()
-            mse = criterion(train_outputs.detach(),train_target.detach())
 
             #train_loss = train_running_loss / (train_iter+1)
             print('epoch %d batch %d loss %.6f lr_rate %.10f'%(epoch, train_iter, train_loss_,optimizer.param_groups[0]['lr']))
